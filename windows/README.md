@@ -52,9 +52,9 @@ If Inno Setup isn't found, the script still stages a ready-to-zip app folder at
 - Chirpa serves the dashboard at <http://localhost:8090> and opens your default
   browser automatically.
 
-Your camera configuration lives in `%USERPROFILE%\.skyrats\cameras.json`. The
+Your camera configuration lives in `%USERPROFILE%\.chirpa\cameras.json`. The
 uninstaller performs a **full clean removal** — it deletes the entire
-`%USERPROFILE%\.skyrats` directory (camera config, cached images, and species
+`%USERPROFILE%\.chirpa` directory (camera config, cached images, and species
 DB), leaving nothing behind.
 
 ## Running without the installer (portable)
@@ -71,4 +71,8 @@ Environment variables (optional):
 |----------|---------|--------|
 | `CHIRPA_HOST` | `127.0.0.1` | Bind address |
 | `CHIRPA_PORT` | `8090` | Port |
+| `CHIRPA_HOME` | `%USERPROFILE%\.chirpa` | Data directory (camera config, images, species DB) |
+| `CHIRPA_LISTENER_DB` | `%USERPROFILE%\.birdnet-listener\detections.db` | BirdNET detection database to read |
+| `CHIRPA_UTC_OFFSET` | _system timezone_ | Force a fixed UTC offset in hours (e.g. `-5`) |
+| `CHIRPA_GEOLOOKUP` | _unset_ | Set to `1` to enable optional IP geolocation (off by default; makes no outbound calls when unset) |
 | `CHIRPA_NO_BROWSER` | _unset_ | Set to `1` to not auto-open the browser |

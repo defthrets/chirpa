@@ -21,7 +21,6 @@
 #define AppPublisher  "Chirpa"
 #define AppVersion    "1.0.0"
 #define AppExeLauncher "Chirpa.cmd"
-#define AppURL        "https://github.com/defthrets/chirpa"
 #define PyW           "python\pythonw.exe"
 
 [Setup]
@@ -29,8 +28,6 @@ AppId={{1AE05D50-5D6C-431A-A462-534D0B42E400}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-AppPublisherURL={#AppURL}
-AppSupportURL={#AppURL}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -70,7 +67,7 @@ Filename: "{app}\{#AppExeLauncher}"; Description: "Launch {#AppName} now"; Flags
 [UninstallDelete]
 ; Full clean removal: delete the entire Chirpa data directory on uninstall
 ; (camera config, cached images, species DB, and the staged chart.min.js).
-Type: filesandordirs; Name: "{%USERPROFILE}\.skyrats"
+Type: filesandordirs; Name: "{%USERPROFILE}\.chirpa"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] on your computer.%n%nChirpa is fully self-contained — a private Python runtime and the ffmpeg tools used to verify camera RTSP streams are included. Nothing else needs to be installed.%n%nIt is recommended that you close all other applications before continuing.

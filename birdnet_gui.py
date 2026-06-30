@@ -64,10 +64,21 @@ def rtsp_probe(url, timeout_s=5):
     except Exception:
         return False, "no_ffprobe"
 
-LISTENER_DB = os.path.expanduser("~/.birdnet-listener/detections.db")
-SOUNDSCAPE_DB = os.path.expanduser("~/.openclaw/workspace/ears/soundscape.db")
+# ── Per-user data locations (all overridable via the environment) ────
+# Nothing here is tied to a specific machine or account — each user's data
+# lives under their own home directory and can be relocated freely.
+DATA_DIR = os.environ.get("CHIRPA_HOME", os.path.expanduser("~/.chirpa"))
+# Path to the BirdNET listener's detection database that Chirpa reads from.
+LISTENER_DB = os.environ.get(
+    "CHIRPA_LISTENER_DB", os.path.expanduser("~/.birdnet-listener/detections.db"))
 
-SYD_TZ = timezone(timedelta(hours=10))
+# Local timezone. Defaults to the machine's own timezone so the dashboard
+# shows times in the user's locale; override with CHIRPA_UTC_OFFSET (hours).
+_tz_off = os.environ.get("CHIRPA_UTC_OFFSET")
+if _tz_off not in (None, ""):
+    LOCAL_TZ = timezone(timedelta(hours=float(_tz_off)))
+else:
+    LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
 # ── Queries ──────────────────────────────────────────────────────────
 
@@ -84,12 +95,12 @@ def q_listener(query, params=()):
 
 def api_summary():
     rows = q_listener("SELECT species, confidence, source, timestamp FROM detections")
-    # Today in AEST (UTC+10) — compute UTC range properly
-    now_syd = datetime.now(SYD_TZ)
-    today_start = now_syd.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Today in the local timezone — compute the UTC range properly
+    now_local = datetime.now(LOCAL_TZ)
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    today_utc_start = (today_start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
-    today_utc_end = (today_end - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    today_utc_start = (today_start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    today_utc_end = (today_end - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
     today_rows = [r for r in rows if r.get("timestamp","")[:16] >= today_utc_start and r.get("timestamp","")[:16] < today_utc_end]
     species_set = set(); cam_stats = {}; top_species = {}
     for r in rows:
@@ -117,41 +128,41 @@ def api_timeline():
 
 def api_aggregate(period):
     rows = q_listener("SELECT species, confidence, source, timestamp FROM detections")
-    now_syd = datetime.now(SYD_TZ)
+    now_local = datetime.now(LOCAL_TZ)
     if period == 'hour':
-        start = now_syd - timedelta(hours=24)
+        start = now_local - timedelta(hours=24)
         fmt = "%Y-%m-%d %H"
         prev_start = start - timedelta(hours=24)
         label_fmt = lambda k: k[11:13] + ':00'
         max_buckets = 24
     elif period == 'week':
-        start = now_syd - timedelta(weeks=12)
+        start = now_local - timedelta(weeks=12)
         prev_start = start - timedelta(weeks=12)
         fmt = "%G-W%V"
         label_fmt = lambda k: 'W' + k.split('W')[1] if 'W' in k else k
         max_buckets = 12
     elif period == 'month':
-        start = now_syd - timedelta(days=365)
+        start = now_local - timedelta(days=365)
         prev_start = start - timedelta(days=365)
         fmt = "%Y-%m"
         label_fmt = lambda k: k[5:7] + '/' + k[2:4]
         max_buckets = 12
     else:  # day
-        start = now_syd - timedelta(days=30)
+        start = now_local - timedelta(days=30)
         prev_start = start - timedelta(days=30)
         fmt = "%Y-%m-%d"
         label_fmt = lambda k: k[5:10]
         max_buckets = 30
-    start_utc = (start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
-    prev_utc = (prev_start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    start_utc = (start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    prev_utc = (prev_start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
     # Current period buckets
     buckets = {}
     for r in rows:
         ts = r.get("timestamp", "")
         if ts and ts >= start_utc:
             dt = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
-            dt_syd = dt.replace(tzinfo=timezone.utc).astimezone(SYD_TZ)
-            k = dt_syd.strftime(fmt)
+            dt_local = dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+            k = dt_local.strftime(fmt)
             buckets.setdefault(k, {"count": 0, "species": set()})
             buckets[k]["count"] += 1; buckets[k]["species"].add(r["species"])
     # Previous period buckets
@@ -160,8 +171,8 @@ def api_aggregate(period):
         ts = r.get("timestamp", "")
         if ts and prev_utc <= ts < start_utc:
             dt = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
-            dt_syd = dt.replace(tzinfo=timezone.utc).astimezone(SYD_TZ)
-            k = dt_syd.strftime(fmt)
+            dt_local = dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+            k = dt_local.strftime(fmt)
             prev_buckets.setdefault(k, {"count": 0})
             prev_buckets[k]["count"] += 1
     # Species breakdown for current period
@@ -359,8 +370,8 @@ def prewarm_images():
 
 # ── Local Species Cache ──────────────────────────────────────────────
 
-LOCAL_DB = os.path.expanduser("~/.skyrats/species.db")
-LOCAL_IMG = os.path.expanduser("~/.skyrats/images")
+LOCAL_DB = os.path.join(DATA_DIR, "species.db")
+LOCAL_IMG = os.path.join(DATA_DIR, "images")
 
 def local_species(species):
     """Get species data from local cache. Returns dict or None."""
@@ -488,7 +499,7 @@ def format_stats(stats):
     cat=[{'name':n,'value':_wd_label(qid)} for n,qid in stats.get('cat',{}).items()]
     return {'num':num,'cat':cat}
 
-SETTINGS_FILE = os.path.expanduser("~/.skyrats/cameras.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "cameras.json")
 
 def get_settings():
     """Load camera + birdnet settings from JSON."""
@@ -548,6 +559,11 @@ def test_camera_stream(cam_id):
 
 def get_location(ip):
     if ip in ('127.0.0.1', '::1', 'localhost'):
+        return 'Home'
+    # Self-contained by default: do NOT call any external service. The optional
+    # IP-geolocation lookup (which would send the visitor's IP to a third party)
+    # is opt-in via CHIRPA_GEOLOOKUP=1.
+    if os.environ.get("CHIRPA_GEOLOOKUP") != "1":
         return 'Home'
     try:
         r = subprocess.run(['curl', '-s', '--max-time', '3',
@@ -1030,8 +1046,8 @@ select.inp{cursor:pointer}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label style="font-size:11px;color:#9aa0a6">Min Confidence</label><input class="inp" id="bn-conf" type="number" min="0.1" max="0.99" step="0.05" value="0.60"></div>
       <div><label style="font-size:11px;color:#9aa0a6">Auto Refresh (sec)</label><input class="inp" id="bn-refresh" type="number" min="10" max="300" value="30"></div>
-      <div><label style="font-size:11px;color:#9aa0a6">Latitude</label><input class="inp" id="bn-lat" type="number" step="0.1" value="-33.5"></div>
-      <div><label style="font-size:11px;color:#9aa0a6">Longitude</label><input class="inp" id="bn-lon" type="number" step="0.1" value="150.7"></div>
+      <div><label style="font-size:11px;color:#9aa0a6">Latitude</label><input class="inp" id="bn-lat" type="number" step="0.1" placeholder="e.g. 40.7"></div>
+      <div><label style="font-size:11px;color:#9aa0a6">Longitude</label><input class="inp" id="bn-lon" type="number" step="0.1" placeholder="e.g. -74.0"></div>
     </div>
     <button class="tab-btn" style="margin-top:12px;background:#303134;color:#8ab4f8" onclick="saveBirdnetSettings()">Save BirdNET Settings</button>
   </div>
@@ -1089,8 +1105,8 @@ async function loadSettings(){
   if(!s)return;
   document.getElementById('bn-conf').value=(s.birdnet||{}).min_confidence||0.60;
   document.getElementById('bn-refresh').value=(s.display||{}).auto_refresh||30;
-  document.getElementById('bn-lat').value=(s.birdnet||{}).lat||-33.5;
-  document.getElementById('bn-lon').value=(s.birdnet||{}).lon||150.7;
+  document.getElementById('bn-lat').value=(s.birdnet||{}).lat??'';
+  document.getElementById('bn-lon').value=(s.birdnet||{}).lon??'';
   renderCameraList(s.cameras||[]);
 }
 
@@ -1383,8 +1399,8 @@ async function saveBirdnetSettings(){
   const s=await api('/api/settings');
   s.birdnet=s.birdnet||{};s.display=s.display||{};
   s.birdnet.min_confidence=parseFloat(document.getElementById('bn-conf').value)||0.6;
-  s.birdnet.lat=parseFloat(document.getElementById('bn-lat').value)||-33.5;
-  s.birdnet.lon=parseFloat(document.getElementById('bn-lon').value)||150.7;
+  s.birdnet.lat=parseFloat(document.getElementById('bn-lat').value)||0;
+  s.birdnet.lon=parseFloat(document.getElementById('bn-lon').value)||0;
   s.display.auto_refresh=parseInt(document.getElementById('bn-refresh').value)||30;
   await fetch('/api/settings/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)});
   alert('✅ Settings saved');
@@ -1619,7 +1635,7 @@ switchPeriod('hour');setInterval(load,30000);
 
 def bootstrap_assets():
     """Make the app self-contained: ensure chart.min.js lives where the
-    server serves it from (~/.skyrats/chart.min.js). On a fresh install the
+    server serves it from (DATA_DIR/chart.min.js). On a fresh install the
     file ships next to the script, so copy it into place on first run."""
     try:
         dest = os.path.join(os.path.dirname(LOCAL_IMG), "chart.min.js")

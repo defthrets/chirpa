@@ -17,8 +17,26 @@ BirdNET detection dashboard, RTSP camera wizard, species encyclopedia, and real-
 - `ffprobe` (from ffmpeg) on `PATH` or bundled — *optional*; enables RTSP stream
   verification in the camera wizard. Without it the wizard still works (it
   validates host + port 554).
-- Running BirdNET instance with `~/.skyrats/species.db` populated
-- Species images in `~/.skyrats/images/`
+- Running BirdNET instance with a species database (default `~/.chirpa/species.db`)
+- Species images in the data directory (default `~/.chirpa/images/`)
+
+### Configuration
+
+Everything is per-user and overridable via the environment — no machine- or
+account-specific values are baked in:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CHIRPA_HOME` | `~/.chirpa` | Data directory (camera config, images, species DB) |
+| `CHIRPA_LISTENER_DB` | `~/.birdnet-listener/detections.db` | BirdNET detection database to read |
+| `CHIRPA_HOST` / `CHIRPA_PORT` | `127.0.0.1` / `8090` | Bind address / port |
+| `CHIRPA_UTC_OFFSET` | _system timezone_ | Force a fixed UTC offset in hours |
+| `CHIRPA_GEOLOOKUP` | _unset_ | `1` enables optional IP geolocation (off by default — no outbound calls) |
+| `CHIRPA_NO_BROWSER` | _unset_ | `1` disables auto-opening the browser |
+
+Times are shown in the machine's local timezone, and the BirdNET latitude/
+longitude are set by each user in **Settings** — nothing is hardcoded to a
+specific location.
 
 > **Windows users:** you don't need to install anything manually. Use the
 > self-contained installer in [`windows/`](windows/README.md) — it bundles
@@ -58,15 +76,11 @@ camera, with built-in walkthroughs for:
 git clone https://github.com/defthrets/chirpa.git
 cd chirpa
 
-# Place chart.min.js where the server expects it
-mkdir -p ~/.skyrats
-cp chart.min.js ~/.skyrats/
-
-# Run
+# Run — chart.min.js is auto-staged into the data dir (~/.chirpa) on first launch
 python3 birdnet_gui.py
 ```
 
-Server runs on `http://127.0.0.1:8090`.
+Server runs on `http://127.0.0.1:8090` and opens in your browser automatically.
 
 ## Tailscale Serve (recommended for remote access)
 
@@ -96,7 +110,7 @@ birdnet_gui.py          — Single-file Python HTTP server
   /api/camera-config   — Camera CRUD
   /api/recent          — Recent detections with pagination
   /chart-js            — Serves chart.min.js
-  /img/<filename>      — Serves ~/.skyrats/images/*
+  /img/<filename>      — Serves <data-dir>/images/*
 ```
 
 ## Data
@@ -104,4 +118,5 @@ birdnet_gui.py          — Single-file Python HTTP server
 Depends on BirdNET's SQLite schema:
 - `detections` table — species, confidence, timestamp, camera
 
-Species images and stats SVGs are sourced from `~/.skyrats/images/`.
+Species images and stats SVGs are sourced from the data directory's `images/`
+folder (default `~/.chirpa/images/`).
