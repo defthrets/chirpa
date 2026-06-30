@@ -1633,6 +1633,22 @@ switchPeriod('hour');setInterval(load,30000);
 </body>
 </html>"""
 
+def migrate_legacy_data():
+    """One-time migration: older versions stored data under ~/.skyrats.
+    If that folder exists and the new DATA_DIR (default ~/.chirpa) hasn't been
+    created yet, move it across so existing users keep their cameras, images,
+    and species DB. Skipped if the user set a custom CHIRPA_HOME."""
+    if os.environ.get("CHIRPA_HOME"):
+        return  # user picked an explicit location; don't second-guess it
+    legacy = os.path.expanduser("~/.skyrats")
+    try:
+        if os.path.isdir(legacy) and not os.path.exists(DATA_DIR):
+            os.makedirs(os.path.dirname(DATA_DIR) or ".", exist_ok=True)
+            shutil.move(legacy, DATA_DIR)
+            print(f"[migrate] moved {legacy} → {DATA_DIR}", file=sys.stderr)
+    except Exception as e:
+        print(f"[migrate] could not migrate {legacy}: {e}", file=sys.stderr)
+
 def bootstrap_assets():
     """Make the app self-contained: ensure chart.min.js lives where the
     server serves it from (DATA_DIR/chart.min.js). On a fresh install the
@@ -1649,6 +1665,7 @@ def bootstrap_assets():
 
 if __name__ == "__main__":
     import threading
+    migrate_legacy_data()
     bootstrap_assets()
     # Pre-warm images in background
     threading.Thread(target=prewarm_images, daemon=True).start()

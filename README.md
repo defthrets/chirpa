@@ -38,6 +38,10 @@ Times are shown in the machine's local timezone, and the BirdNET latitude/
 longitude are set by each user in **Settings** — nothing is hardcoded to a
 specific location.
 
+> Upgrading from an older build? On first launch Chirpa automatically moves a
+> legacy `~/.skyrats` data folder to `~/.chirpa`, so your cameras, images, and
+> species DB carry over with no manual steps.
+
 > **Windows users:** you don't need to install anything manually. Use the
 > self-contained installer in [`windows/`](windows/README.md) — it bundles
 > Python and ffmpeg into a one-click `ChirpaSetup.exe`.
