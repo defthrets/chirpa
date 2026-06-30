@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """BirdNET Dashboard — Google Dark Material aesthetic web GUI."""
 
-import json, os, sqlite3, subprocess, sys, time, urllib.request, socket, re
+import json, os, sqlite3, subprocess, sys, time, urllib.request, socket, re, shutil
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -11,13 +11,74 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-HOST = "127.0.0.1"
-PORT = 8090
+# Host/port may be overridden by the environment (the Windows installer sets these).
+HOST = os.environ.get("CHIRPA_HOST", "127.0.0.1")
+PORT = int(os.environ.get("CHIRPA_PORT", "8090"))
 
-LISTENER_DB = os.path.expanduser("~/.birdnet-listener/detections.db")
-SOUNDSCAPE_DB = os.path.expanduser("~/.openclaw/workspace/ears/soundscape.db")
+# ── Platform helpers ─────────────────────────────────────────────────
+# Chirpa ships as a fully self-contained app on Windows. Native tools
+# (ffprobe/ffmpeg) are bundled next to the script so RTSP probing works
+# without anything else installed; we fall back to a PATH lookup elsewhere.
+IS_WINDOWS = os.name == "nt"
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SYD_TZ = timezone(timedelta(hours=10))
+def _find_tool(name):
+    """Locate a bundled or system binary (e.g. ffprobe, ffmpeg)."""
+    exe = name + (".exe" if IS_WINDOWS else "")
+    # 1) bundled alongside the app (installer drops ffmpeg here)
+    for sub in (".", "ffmpeg", os.path.join("ffmpeg", "bin"), "bin", "vendor"):
+        cand = os.path.join(APP_DIR, sub, exe)
+        if os.path.isfile(cand):
+            return cand
+    # 2) anything on PATH
+    return shutil.which(name) or shutil.which(exe)
+
+FFPROBE = _find_tool("ffprobe")
+
+def ping_host(ip, count=1, timeout_s=2):
+    """Cross-platform single ICMP ping. Returns True if the host replies."""
+    if IS_WINDOWS:
+        cmd = ["ping", "-n", str(count), "-w", str(timeout_s * 1000), ip]
+    else:
+        cmd = ["ping", "-c", str(count), "-W", str(timeout_s), ip]
+    try:
+        return subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=timeout_s + 3).returncode == 0
+    except Exception:
+        return False
+
+def rtsp_probe(url, timeout_s=5):
+    """Probe an RTSP URL with ffprobe. Returns (ok, reason).
+
+    reason is one of: 'ok', 'unreachable', 'no_ffprobe'."""
+    if not FFPROBE:
+        return False, "no_ffprobe"
+    cmd = [FFPROBE, "-v", "quiet", "-rtsp_transport", "tcp",
+           "-show_streams", "-i", url]
+    try:
+        rc = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=timeout_s).returncode
+        return (rc == 0), ("ok" if rc == 0 else "unreachable")
+    except subprocess.TimeoutExpired:
+        return False, "unreachable"
+    except Exception:
+        return False, "no_ffprobe"
+
+# ── Per-user data locations (all overridable via the environment) ────
+# Nothing here is tied to a specific machine or account — each user's data
+# lives under their own home directory and can be relocated freely.
+DATA_DIR = os.environ.get("CHIRPA_HOME", os.path.expanduser("~/.chirpa"))
+# Path to the BirdNET listener's detection database that Chirpa reads from.
+LISTENER_DB = os.environ.get(
+    "CHIRPA_LISTENER_DB", os.path.expanduser("~/.birdnet-listener/detections.db"))
+
+# Local timezone. Defaults to the machine's own timezone so the dashboard
+# shows times in the user's locale; override with CHIRPA_UTC_OFFSET (hours).
+_tz_off = os.environ.get("CHIRPA_UTC_OFFSET")
+if _tz_off not in (None, ""):
+    LOCAL_TZ = timezone(timedelta(hours=float(_tz_off)))
+else:
+    LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
 # ── Queries ──────────────────────────────────────────────────────────
 
@@ -34,12 +95,12 @@ def q_listener(query, params=()):
 
 def api_summary():
     rows = q_listener("SELECT species, confidence, source, timestamp FROM detections")
-    # Today in AEST (UTC+10) — compute UTC range properly
-    now_syd = datetime.now(SYD_TZ)
-    today_start = now_syd.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Today in the local timezone — compute the UTC range properly
+    now_local = datetime.now(LOCAL_TZ)
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    today_utc_start = (today_start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
-    today_utc_end = (today_end - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    today_utc_start = (today_start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    today_utc_end = (today_end - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
     today_rows = [r for r in rows if r.get("timestamp","")[:16] >= today_utc_start and r.get("timestamp","")[:16] < today_utc_end]
     species_set = set(); cam_stats = {}; top_species = {}
     for r in rows:
@@ -67,41 +128,41 @@ def api_timeline():
 
 def api_aggregate(period):
     rows = q_listener("SELECT species, confidence, source, timestamp FROM detections")
-    now_syd = datetime.now(SYD_TZ)
+    now_local = datetime.now(LOCAL_TZ)
     if period == 'hour':
-        start = now_syd - timedelta(hours=24)
+        start = now_local - timedelta(hours=24)
         fmt = "%Y-%m-%d %H"
         prev_start = start - timedelta(hours=24)
         label_fmt = lambda k: k[11:13] + ':00'
         max_buckets = 24
     elif period == 'week':
-        start = now_syd - timedelta(weeks=12)
+        start = now_local - timedelta(weeks=12)
         prev_start = start - timedelta(weeks=12)
         fmt = "%G-W%V"
         label_fmt = lambda k: 'W' + k.split('W')[1] if 'W' in k else k
         max_buckets = 12
     elif period == 'month':
-        start = now_syd - timedelta(days=365)
+        start = now_local - timedelta(days=365)
         prev_start = start - timedelta(days=365)
         fmt = "%Y-%m"
         label_fmt = lambda k: k[5:7] + '/' + k[2:4]
         max_buckets = 12
     else:  # day
-        start = now_syd - timedelta(days=30)
+        start = now_local - timedelta(days=30)
         prev_start = start - timedelta(days=30)
         fmt = "%Y-%m-%d"
         label_fmt = lambda k: k[5:10]
         max_buckets = 30
-    start_utc = (start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
-    prev_utc = (prev_start - SYD_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    start_utc = (start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
+    prev_utc = (prev_start - LOCAL_TZ.utcoffset(None)).strftime("%Y-%m-%d %H:%M")
     # Current period buckets
     buckets = {}
     for r in rows:
         ts = r.get("timestamp", "")
         if ts and ts >= start_utc:
             dt = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
-            dt_syd = dt.replace(tzinfo=timezone.utc).astimezone(SYD_TZ)
-            k = dt_syd.strftime(fmt)
+            dt_local = dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+            k = dt_local.strftime(fmt)
             buckets.setdefault(k, {"count": 0, "species": set()})
             buckets[k]["count"] += 1; buckets[k]["species"].add(r["species"])
     # Previous period buckets
@@ -110,8 +171,8 @@ def api_aggregate(period):
         ts = r.get("timestamp", "")
         if ts and prev_utc <= ts < start_utc:
             dt = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
-            dt_syd = dt.replace(tzinfo=timezone.utc).astimezone(SYD_TZ)
-            k = dt_syd.strftime(fmt)
+            dt_local = dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+            k = dt_local.strftime(fmt)
             prev_buckets.setdefault(k, {"count": 0})
             prev_buckets[k]["count"] += 1
     # Species breakdown for current period
@@ -309,8 +370,8 @@ def prewarm_images():
 
 # ── Local Species Cache ──────────────────────────────────────────────
 
-LOCAL_DB = os.path.expanduser("~/.skyrats/species.db")
-LOCAL_IMG = os.path.expanduser("~/.skyrats/images")
+LOCAL_DB = os.path.join(DATA_DIR, "species.db")
+LOCAL_IMG = os.path.join(DATA_DIR, "images")
 
 def local_species(species):
     """Get species data from local cache. Returns dict or None."""
@@ -438,7 +499,7 @@ def format_stats(stats):
     cat=[{'name':n,'value':_wd_label(qid)} for n,qid in stats.get('cat',{}).items()]
     return {'num':num,'cat':cat}
 
-SETTINGS_FILE = os.path.expanduser("~/.skyrats/cameras.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "cameras.json")
 
 def get_settings():
     """Load camera + birdnet settings from JSON."""
@@ -499,6 +560,11 @@ def test_camera_stream(cam_id):
 def get_location(ip):
     if ip in ('127.0.0.1', '::1', 'localhost'):
         return 'Home'
+    # Self-contained by default: do NOT call any external service. The optional
+    # IP-geolocation lookup (which would send the visitor's IP to a third party)
+    # is opt-in via CHIRPA_GEOLOOKUP=1.
+    if os.environ.get("CHIRPA_GEOLOOKUP") != "1":
+        return 'Home'
     try:
         r = subprocess.run(['curl', '-s', '--max-time', '3',
             f'https://ipinfo.io/{ip}/json'],
@@ -554,33 +620,35 @@ def test_connection(handler):
     if not re.match(r'^(\d{1,3}\.){3}\d{1,3}$', ip):
         errors.append(f"'{ip}' is not a valid IP address")
         return {"ok": False, "errors": errors}
-    # Ping
-    ping_ok = os.system(f"ping -c 1 -W 2 {ip} > /dev/null 2>&1") == 0
+    # Ping (cross-platform). A blocked ping is a warning, not a hard failure —
+    # many cameras drop ICMP but still serve RTSP.
+    ping_ok = ping_host(ip)
     if not ping_ok:
-        errors.append(f"Cannot ping {ip} — camera may be offline or blocking ICMP")
-    # Port check
+        warnings.append(f"{ip} did not answer a ping (camera may block ICMP — that's often fine)")
+    # Port check — this is the real reachability test.
+    port_ok = False
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3)
         result = sock.connect_ex((ip, int(port)))
         sock.close()
-        if result != 0:
-            errors.append(f"Port {port} is not open on {ip} — RTSP may be disabled")
+        port_ok = (result == 0)
+        if not port_ok:
+            errors.append(f"Port {port} is not open on {ip} — RTSP may be disabled, or the IP/port is wrong")
     except Exception as e:
         errors.append(f"Connection error: {str(e)}")
-    # Optional RTSP handshake check
-    if ping_ok and not errors:
-        try:
-            url = f"rtsp://{user}:{pw}@{ip}:{port}{path}"
-            # Use ffprobe to test RTSP reachability (quick, no streaming)
-            rc = os.system(f"timeout 5 ffprobe -v quiet -show_streams -rtsp_transport tcp \"{url}\" >/dev/null 2>&1")
-            if rc != 0:
-                warnings.append("RTSP stream not responding — check path and credentials")
-                errors.append(f"RTSP stream unreachable at {path}")
-        except:
-            warnings.append("Could not verify RTSP stream — ffprobe unavailable")
+    # Optional RTSP handshake check via ffprobe (validates path + credentials).
+    if port_ok:
+        url = f"rtsp://{user}:{pw}@{ip}:{port}{path}"
+        rtsp_ok, reason = rtsp_probe(url)
+        if reason == "no_ffprobe":
+            warnings.append("RTSP path not verified — ffprobe unavailable (port is open, so this is usually OK)")
+        elif not rtsp_ok:
+            errors.append(f"RTSP stream unreachable at {path} — check the stream path and username/password")
     if errors:
         return {"ok": False, "errors": errors, "warnings": warnings}
+    # Success: port is open (and RTSP verified if ffprobe was available).
+    return {"ok": True, "warnings": warnings}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, f, *a): print(f"[{datetime.now():%H:%M:%S}] {self.client_address[0]} {f % a}", flush=True)
@@ -803,6 +871,18 @@ select.inp{cursor:pointer}
 .brand-card .brand-icon{font-size:26px;margin-bottom:4px}
 .brand-card .brand-name{font-weight:600;color:#e8eaed}
 .brand-card .brand-sub{font-size:10px;color:#9aa0a6;margin-top:2px}
+.wiz-help{margin-top:6px;background:#202124;border:1px solid #3c4043;border-radius:10px;overflow:hidden}
+.wiz-help summary{cursor:pointer;list-style:none;padding:10px 12px;font-size:12px;font-weight:600;color:#8ab4f8;user-select:none}
+.wiz-help summary::-webkit-details-marker{display:none}
+.wiz-help summary:hover{background:#252528}
+.wiz-help[open] summary{border-bottom:1px solid #3c4043}
+.wiz-help-body{padding:12px 14px;font-size:11px;line-height:1.7;color:#bdc1c6}
+.wiz-help-body code{color:#8ab4f8;background:#0f0f10;padding:1px 5px;border-radius:4px;font-size:10px;word-break:break-all}
+.wiz-help-body b{color:#e8eaed}
+.wiz-help-body h4{color:#e8eaed;font-size:12px;margin:10px 0 4px}
+.wiz-help-body h4:first-child{margin-top:0}
+.wiz-help-body ol,.wiz-help-body ul{margin:4px 0 8px;padding-left:18px}
+.wiz-help-body li{margin-bottom:3px}
 .modal-footer{padding:16px 24px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #3c4043}
 .modal-footer button{padding:8px 20px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s}
 .modal-btn-prev{background:#303134;color:#e8eaed}
@@ -896,6 +976,7 @@ select.inp{cursor:pointer}
       <div class="modal-step-dot" data-step="1"></div>
       <div class="modal-step-dot" data-step="2"></div>
       <div class="modal-step-dot" data-step="3"></div>
+      <div class="modal-step-dot" data-step="4"></div>
     </div>
     <div class="modal-body">
       <div class="step-content active" id="step-0">
@@ -915,12 +996,20 @@ select.inp{cursor:pointer}
             <div><label style="display:block;font-size:11px;color:#9aa0a6;margin-bottom:3px">Username</label><input id="wiz-user" class="inp" placeholder="admin"></div>
             <div><label style="display:block;font-size:11px;color:#9aa0a6;margin-bottom:3px">Password</label><input id="wiz-pass" class="inp" type="password"></div>
           </div>
+          <details class="wiz-help">
+            <summary>🔍 How do I find my camera's IP address?</summary>
+            <div class="wiz-help-body" id="wiz-iphelp"></div>
+          </details>
         </div>
       </div>
       <div class="step-content" id="step-2">
-        <p style="font-size:12px;color:#9aa0a6;margin-bottom:12px">📖 Setup guide</p>
+        <p style="font-size:12px;color:#9aa0a6;margin-bottom:12px">📖 Step-by-step setup guide</p>
         <div id="wiz-guide" style="font-size:11px;color:#bdc1c6;line-height:1.7;background:#202124;border-radius:10px;padding:14px">
         </div>
+        <details class="wiz-help" style="margin-top:10px">
+          <summary>🧭 Universal RTSP walkthrough (works for any camera)</summary>
+          <div class="wiz-help-body" id="wiz-universal"></div>
+        </details>
       </div>
       <div class="step-content" id="step-3">
         <p style="font-size:12px;color:#9aa0a6;margin-bottom:14px">Stream configuration</p>
@@ -957,8 +1046,8 @@ select.inp{cursor:pointer}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label style="font-size:11px;color:#9aa0a6">Min Confidence</label><input class="inp" id="bn-conf" type="number" min="0.1" max="0.99" step="0.05" value="0.60"></div>
       <div><label style="font-size:11px;color:#9aa0a6">Auto Refresh (sec)</label><input class="inp" id="bn-refresh" type="number" min="10" max="300" value="30"></div>
-      <div><label style="font-size:11px;color:#9aa0a6">Latitude</label><input class="inp" id="bn-lat" type="number" step="0.1" value="-33.5"></div>
-      <div><label style="font-size:11px;color:#9aa0a6">Longitude</label><input class="inp" id="bn-lon" type="number" step="0.1" value="150.7"></div>
+      <div><label style="font-size:11px;color:#9aa0a6">Latitude</label><input class="inp" id="bn-lat" type="number" step="0.1" placeholder="e.g. 40.7"></div>
+      <div><label style="font-size:11px;color:#9aa0a6">Longitude</label><input class="inp" id="bn-lon" type="number" step="0.1" placeholder="e.g. -74.0"></div>
     </div>
     <button class="tab-btn" style="margin-top:12px;background:#303134;color:#8ab4f8" onclick="saveBirdnetSettings()">Save BirdNET Settings</button>
   </div>
@@ -1016,8 +1105,8 @@ async function loadSettings(){
   if(!s)return;
   document.getElementById('bn-conf').value=(s.birdnet||{}).min_confidence||0.60;
   document.getElementById('bn-refresh').value=(s.display||{}).auto_refresh||30;
-  document.getElementById('bn-lat').value=(s.birdnet||{}).lat||-33.5;
-  document.getElementById('bn-lon').value=(s.birdnet||{}).lon||150.7;
+  document.getElementById('bn-lat').value=(s.birdnet||{}).lat??'';
+  document.getElementById('bn-lon').value=(s.birdnet||{}).lon??'';
   renderCameraList(s.cameras||[]);
 }
 
@@ -1072,6 +1161,60 @@ const BRANDS=[
    guide:'<b>1.</b> For USB webcams: use <code>/dev/video0</code> with ffmpeg<br><b>2.</b> For IP cams with MJPEG: <code>http://IP:port/video.cgi</code><br><b>3.</b> Test in browser first — paste URL to verify stream<br><b>4.</b> ⚠️ No audio over MJPEG — BirdNET needs RTSP for audio<br>💡 Use RTSP instead for BirdNET — MJPEG is video-only.'},
 ];
 
+// Detailed walkthrough: how to discover the camera's IP address on the LAN.
+const IP_HELP=`
+<h4>Option A — Your router's admin page (most reliable)</h4>
+<ol>
+  <li>Open a browser and go to your router, usually <code>http://192.168.1.1</code> or <code>http://192.168.0.1</code>. On Windows you can find it: press <b>Win+R</b>, type <code>cmd</code>, then run <code>ipconfig</code> — the <b>Default Gateway</b> line is your router's address.</li>
+  <li>Log in (the password is often printed on a sticker under the router).</li>
+  <li>Find <b>Connected Devices</b> / <b>DHCP Client List</b> / <b>Attached Devices</b>.</li>
+  <li>Look for a device whose name or MAC vendor matches your camera brand (Tapo, Reolink, Hikvision, Dahua, etc.). The IP shown (e.g. <code>192.168.1.42</code>) is your camera.</li>
+  <li>💡 <b>Reserve it:</b> set a <b>DHCP reservation / static lease</b> for that camera so its IP never changes.</li>
+</ol>
+<h4>Option B — The camera's own mobile app</h4>
+<ol>
+  <li>Open the app you set the camera up with (Tapo, Reolink, Reolink, Mi Home, Amcrest, etc.).</li>
+  <li>Go to the camera's <b>Settings → Device / Network Info</b>.</li>
+  <li>The local <b>IP Address</b> is listed there. (Tapo: ⚙️ → Device Info → IP Address.)</li>
+</ol>
+<h4>Option C — Scan your network</h4>
+<ul>
+  <li><b>Windows:</b> open <code>cmd</code> and run <code>arp -a</code> to list every IP + MAC on the LAN, or install the free <b>Advanced IP Scanner</b> for names &amp; vendors.</li>
+  <li><b>Phone:</b> install <b>Fing</b> (iOS/Android) → tap your Wi-Fi → it lists every device with vendor names.</li>
+  <li><b>ONVIF cameras:</b> <b>ONVIF Device Manager</b> (Windows) auto-discovers cameras <i>and</i> shows their RTSP URLs.</li>
+</ul>
+<h4>Verify it's the right device</h4>
+<ol>
+  <li>Type <code>http://&lt;that-ip&gt;</code> into a browser — many cameras show a login page, confirming it's the camera.</li>
+  <li>From <code>cmd</code>: <code>ping &lt;that-ip&gt;</code> should get replies (some cameras block ping — that's OK).</li>
+</ol>
+<p>💡 Once you have the IP, type it into the <b>IP Address</b> box above. Port is almost always <code>554</code> for RTSP.</p>`;
+
+// Universal RTSP walkthrough shown alongside the brand-specific guide.
+const UNIVERSAL_HELP=`
+<h4>1 · Put the camera on your network</h4>
+<p>Finish setup in the manufacturer's app so the camera has Wi-Fi/Ethernet and an IP address on your LAN.</p>
+<h4>2 · Enable RTSP &amp; create a viewing account</h4>
+<p>RTSP is sometimes off by default. In the camera's app or web page, enable <b>RTSP</b> (a.k.a. "local stream", "ONVIF", or "third-party access"). Many brands (Tapo, some Hikvision) need a separate <b>Camera Account</b> — username + password used <i>only</i> for the stream, not your cloud login.</p>
+<h4>3 · Find the IP address</h4>
+<p>Use the "How do I find my camera's IP address?" panel on the previous step.</p>
+<h4>4 · Build the RTSP URL</h4>
+<p>The pattern is:</p>
+<p><code>rtsp://USERNAME:PASSWORD@IP:554/STREAM_PATH</code></p>
+<p>Example: <code>rtsp://birdcam:s3cret@192.168.1.42:554/stream2</code>. The <b>stream path</b> differs per brand — pick your brand on step 1 to auto-fill it, or see the brand guide above.</p>
+<h4>5 · Test before saving</h4>
+<ul>
+  <li><b>In VLC:</b> Media → <b>Open Network Stream</b> → paste the full <code>rtsp://…</code> URL → Play. If you see video, the URL is correct.</li>
+  <li><b>In Chirpa:</b> the wizard's <b>🔌 Test Connection</b> button (final step) pings the camera, checks port 554, and probes the RTSP handshake for you.</li>
+</ul>
+<h4>Troubleshooting</h4>
+<ul>
+  <li><b>Port 554 closed:</b> RTSP isn't enabled, or the IP/port is wrong.</li>
+  <li><b>Port open but stream fails:</b> wrong stream path or wrong username/password — try the brand's sub-stream path.</li>
+  <li><b>Works in VLC, not in Chirpa:</b> double-check you typed the same path/credentials; special characters in the password may need URL-encoding (e.g. <code>@</code> → <code>%40</code>).</li>
+  <li>💡 For BirdNET, prefer the lower-resolution <b>sub-stream</b> — it carries the same audio with far less CPU.</li>
+</ul>`;
+
 let wizStep=0,wizBrand=null;
 
 function openWizard(){
@@ -1092,6 +1235,9 @@ function openWizard(){
   document.getElementById('wiz-snap').value='';
   document.getElementById('wiz-audio').checked=true;
   document.getElementById('wiz-enabled').checked=true;
+  // Populate the detailed walkthrough panels
+  document.getElementById('wiz-iphelp').innerHTML=IP_HELP;
+  document.getElementById('wiz-universal').innerHTML=UNIVERSAL_HELP;
   updateStep();
 }
 
@@ -1110,7 +1256,7 @@ function pickBrand(id){
     // Show guide
     document.getElementById('wiz-guide').innerHTML=wizBrand.guide||'No specific guide — configure RTSP as per manufacturer instructions.';
   }
-  wizNext(); // go to step 1 (guide)
+  wizNext(); // advance to the connection-details step
 }
 
 function updateStep(){
@@ -1253,8 +1399,8 @@ async function saveBirdnetSettings(){
   const s=await api('/api/settings');
   s.birdnet=s.birdnet||{};s.display=s.display||{};
   s.birdnet.min_confidence=parseFloat(document.getElementById('bn-conf').value)||0.6;
-  s.birdnet.lat=parseFloat(document.getElementById('bn-lat').value)||-33.5;
-  s.birdnet.lon=parseFloat(document.getElementById('bn-lon').value)||150.7;
+  s.birdnet.lat=parseFloat(document.getElementById('bn-lat').value)||0;
+  s.birdnet.lon=parseFloat(document.getElementById('bn-lon').value)||0;
   s.display.auto_refresh=parseInt(document.getElementById('bn-refresh').value)||30;
   await fetch('/api/settings/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)});
   alert('✅ Settings saved');
@@ -1487,12 +1633,56 @@ switchPeriod('hour');setInterval(load,30000);
 </body>
 </html>"""
 
+def migrate_legacy_data():
+    """One-time migration: older versions stored data under ~/.skyrats.
+    If that folder exists and the new DATA_DIR (default ~/.chirpa) hasn't been
+    created yet, move it across so existing users keep their cameras, images,
+    and species DB. Skipped if the user set a custom CHIRPA_HOME."""
+    if os.environ.get("CHIRPA_HOME"):
+        return  # user picked an explicit location; don't second-guess it
+    legacy = os.path.expanduser("~/.skyrats")
+    try:
+        if os.path.isdir(legacy) and not os.path.exists(DATA_DIR):
+            os.makedirs(os.path.dirname(DATA_DIR) or ".", exist_ok=True)
+            shutil.move(legacy, DATA_DIR)
+            print(f"[migrate] moved {legacy} → {DATA_DIR}", file=sys.stderr)
+    except Exception as e:
+        print(f"[migrate] could not migrate {legacy}: {e}", file=sys.stderr)
+
+def bootstrap_assets():
+    """Make the app self-contained: ensure chart.min.js lives where the
+    server serves it from (DATA_DIR/chart.min.js). On a fresh install the
+    file ships next to the script, so copy it into place on first run."""
+    try:
+        dest = os.path.join(os.path.dirname(LOCAL_IMG), "chart.min.js")
+        if not os.path.isfile(dest):
+            src = os.path.join(APP_DIR, "chart.min.js")
+            if os.path.isfile(src):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(src, dest)
+    except Exception as e:
+        print(f"[bootstrap] could not stage chart.min.js: {e}", file=sys.stderr)
+
 if __name__ == "__main__":
     import threading
+    migrate_legacy_data()
+    bootstrap_assets()
     # Pre-warm images in background
     threading.Thread(target=prewarm_images, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"BirdNET Dashboard → http://localhost:{PORT} (also Tailscale)")
+    url = f"http://{'localhost' if HOST in ('127.0.0.1', '0.0.0.0') else HOST}:{PORT}"
+    print(f"Chirpa / BirdNET Dashboard → {url}")
+    if not FFPROBE:
+        print("[note] ffprobe not found — RTSP stream verification will be skipped.", file=sys.stderr)
+    # Open the dashboard in the default browser (skip with CHIRPA_NO_BROWSER=1).
+    if os.environ.get("CHIRPA_NO_BROWSER") != "1":
+        def _open():
+            time.sleep(1.0)
+            try:
+                import webbrowser; webbrowser.open(url)
+            except Exception:
+                pass
+        threading.Thread(target=_open, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
