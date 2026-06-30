@@ -1,7 +1,12 @@
-# 🐦 Chirpa
+<p align="center">
+  <img src="chirpa_logo.png" alt="Chirpa" width="360">
+</p>
 
-BirdNET detection dashboard, RTSP camera setup wizard, species encyclopedia, and
-real-time charts.
+<p align="center">
+  BirdNET detection dashboard, RTSP camera setup wizard, species encyclopedia, and real-time charts.
+</p>
+
+## Features
 
 - **Dashboard** — hourly/daily/weekly/monthly stats with Chart.js visualizations
 - **Species detail popup** — Wikidata-powered encyclopedia with stats infographics
