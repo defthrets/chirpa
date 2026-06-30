@@ -11,6 +11,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a release under this tag (e.g. v1.0.0). Leave blank to only upload a build artifact.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -36,9 +41,19 @@ jobs:
           path: windows/dist/ChirpaSetup.exe
           if-no-files-found: error
 
-      - name: Attach installer to release
+      - name: Attach installer to release (tag push)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          files: windows/dist/ChirpaSetup.exe
+          generate_release_notes: true
+
+      - name: Publish release (manual dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
           files: windows/dist/ChirpaSetup.exe
           generate_release_notes: true
