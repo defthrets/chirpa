@@ -14,8 +14,42 @@ BirdNET detection dashboard, RTSP camera wizard, species encyclopedia, and real-
 - Python 3.9+
 - No pip packages required (stdlib only)
 - Chart.js served locally (`chart.min.js`) — included in this repo
+- `ffprobe` (from ffmpeg) on `PATH` or bundled — *optional*; enables RTSP stream
+  verification in the camera wizard. Without it the wizard still works (it
+  validates host + port 554).
 - Running BirdNET instance with `~/.skyrats/species.db` populated
 - Species images in `~/.skyrats/images/`
+
+> **Windows users:** you don't need to install anything manually. Use the
+> self-contained installer in [`windows/`](windows/README.md) — it bundles
+> Python and ffmpeg into a one-click `ChirpaSetup.exe`.
+
+## Windows (one-click installer)
+
+A fully self-contained Windows installer is built from [`windows/`](windows/README.md):
+
+```powershell
+cd windows
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+This produces `windows/dist/ChirpaSetup.exe`, which bundles a private Python
+runtime + ffmpeg so the app runs on a clean machine with nothing pre-installed.
+See [`windows/README.md`](windows/README.md) for details.
+
+## Camera setup wizard
+
+The **Settings → + Add Camera** wizard walks you through connecting an RTSP
+camera, with built-in walkthroughs for:
+
+- **Finding your camera's IP address** — via your router's admin page, the
+  manufacturer's app, or a network scan (`arp -a`, Advanced IP Scanner, Fing,
+  ONVIF Device Manager).
+- **Building & testing the RTSP URL** — per-brand stream paths (Tapo, Reolink,
+  Hikvision, Dahua, Amcrest, Wyze, Kogan, generic ONVIF) plus a universal
+  walkthrough and VLC test instructions.
+- **Connection testing** — the wizard pings the camera, checks port 554, and
+  (when `ffprobe` is available) probes the RTSP handshake before saving.
 
 ## Quick Start
 
