@@ -1,0 +1,31 @@
+# Reference systemd user unit for Chirpa.
+#
+# You normally don't need this file — ./linux/install.sh generates a unit with
+# the correct paths automatically. It's kept here as a reference/template for
+# manual setups.
+#
+# Manual install:
+#   mkdir -p ~/.config/systemd/user ~/.local/share/chirpa
+#   cp birdnet_gui.py chart.min.js ~/.local/share/chirpa/
+#   cp linux/chirpa.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chirpa
+#
+# Adjust ExecStart/WorkingDirectory below if you install somewhere else.
+
+[Unit]
+Description=Chirpa BirdNET Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/chirpa/birdnet_gui.py
+WorkingDirectory=%h/.local/share/chirpa
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+Environment=CHIRPA_NO_BROWSER=1
+
+[Install]
+WantedBy=default.target

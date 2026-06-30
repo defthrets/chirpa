@@ -1,107 +1,178 @@
 # 🐦 Chirpa
 
-BirdNET detection dashboard, RTSP camera wizard, species encyclopedia, and real-time charts.
-
-## Features
+BirdNET detection dashboard, RTSP camera setup wizard, species encyclopedia, and
+real-time charts.
 
 - **Dashboard** — hourly/daily/weekly/monthly stats with Chart.js visualizations
 - **Species detail popup** — Wikidata-powered encyclopedia with stats infographics
-- **Camera management** — RTSP wizard for Tapo, Reolink, Hikvision, and generic cameras
-- **BirdNET integration** — reads from BirdNET SQLite detection database
+- **Camera wizard** — guided RTSP setup for Tapo, Reolink, Hikvision, Dahua,
+  Amcrest, Wyze, Kogan, and generic ONVIF cameras, with built-in help for
+  finding your camera's IP and testing the stream
+- **BirdNET integration** — reads from a BirdNET SQLite detection database
+- **Self-contained** — Python stdlib only; no machine- or account-specific
+  values are baked in, and it makes no calls to any private server
 
-## Requirements
+---
 
-- Python 3.9+
-- No pip packages required (stdlib only)
-- Chart.js served locally (`chart.min.js`) — included in this repo
-- `ffprobe` (from ffmpeg) on `PATH` or bundled — *optional*; enables RTSP stream
-  verification in the camera wizard. Without it the wizard still works (it
-  validates host + port 554).
-- Running BirdNET instance with a species database (default `~/.chirpa/species.db`)
-- Species images in the data directory (default `~/.chirpa/images/`)
+## Install
 
-### Configuration
+Pick your platform:
 
-Everything is per-user and overridable via the environment — no machine- or
-account-specific values are baked in:
+- [Windows — one-click installer](#windows-walkthrough)
+- [Linux — install script](#linux-walkthrough)
+- [Manual / any OS](#manual-run-any-os)
 
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `CHIRPA_HOME` | `~/.chirpa` | Data directory (camera config, images, species DB) |
-| `CHIRPA_LISTENER_DB` | `~/.birdnet-listener/detections.db` | BirdNET detection database to read |
-| `CHIRPA_HOST` / `CHIRPA_PORT` | `127.0.0.1` / `8090` | Bind address / port |
-| `CHIRPA_UTC_OFFSET` | _system timezone_ | Force a fixed UTC offset in hours |
-| `CHIRPA_GEOLOOKUP` | _unset_ | `1` enables optional IP geolocation (off by default — no outbound calls) |
-| `CHIRPA_NO_BROWSER` | _unset_ | `1` disables auto-opening the browser |
+Once it's running, open **http://127.0.0.1:8090** (it opens automatically) and
+go to **Settings → + Add Camera** to connect your first camera.
 
-Times are shown in the machine's local timezone, and the BirdNET latitude/
-longitude are set by each user in **Settings** — nothing is hardcoded to a
-specific location.
+---
 
-> Upgrading from an older build? On first launch Chirpa automatically moves a
-> legacy `~/.skyrats` data folder to `~/.chirpa`, so your cameras, images, and
-> species DB carry over with no manual steps.
+## Windows walkthrough
 
-> **Windows users:** you don't need to install anything manually. Use the
-> self-contained installer in [`windows/`](windows/README.md) — it bundles
-> Python and ffmpeg into a one-click `ChirpaSetup.exe`.
+Chirpa ships as a **fully self-contained installer** — the target PC needs
+**nothing** pre-installed (no Python, no ffmpeg, no PATH changes). Everything is
+bundled into a single `ChirpaSetup.exe`.
 
-## Windows (one-click installer)
+### A. Install (for end users)
 
-A fully self-contained Windows installer is built from [`windows/`](windows/README.md):
+1. Get **`ChirpaSetup.exe`** (from a release, or build it — see below).
+2. Double-click it and follow the wizard:
+   - Choose the install location (default `C:\Program Files\Chirpa`).
+   - Optionally tick **Create a desktop shortcut** and/or **Start automatically
+     when I log in**.
+3. Leave **Launch Chirpa now** ticked and click **Finish**.
+4. Chirpa starts and opens **http://localhost:8090** in your browser.
+
+To start it later, use the **Chirpa** shortcut in the Start Menu (or desktop).
+
+To remove it: **Settings → Apps → Chirpa → Uninstall**. This performs a full
+clean removal, including your data folder `%USERPROFILE%\.chirpa`.
+
+### B. Build the installer (for maintainers)
+
+On a Windows machine with **[Inno Setup 6](https://jrsoftware.org/isdl.php)**
+installed:
 
 ```powershell
 cd windows
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-This produces `windows/dist/ChirpaSetup.exe`, which bundles a private Python
-runtime + ffmpeg so the app runs on a clean machine with nothing pre-installed.
-See [`windows/README.md`](windows/README.md) for details.
+`build.ps1` downloads an embedded Python runtime and ffmpeg, stages them with
+the app, and compiles **`windows\dist\ChirpaSetup.exe`**. Full details and
+options are in [`windows/README.md`](windows/README.md).
 
-## Camera setup wizard
+> No build machine handy? After staging, `windows\build\staging\` is a portable
+> folder — copy it anywhere and double-click **`Chirpa.cmd`**.
 
-The **Settings → + Add Camera** wizard walks you through connecting an RTSP
-camera, with built-in walkthroughs for:
+---
 
-- **Finding your camera's IP address** — via your router's admin page, the
-  manufacturer's app, or a network scan (`arp -a`, Advanced IP Scanner, Fing,
-  ONVIF Device Manager).
-- **Building & testing the RTSP URL** — per-brand stream paths (Tapo, Reolink,
-  Hikvision, Dahua, Amcrest, Wyze, Kogan, generic ONVIF) plus a universal
-  walkthrough and VLC test instructions.
-- **Connection testing** — the wizard pings the camera, checks port 554, and
-  (when `ffprobe` is available) probes the RTSP handshake before saving.
+## Linux walkthrough
 
-## Quick Start
+### A. Install with the script (recommended)
 
 ```bash
-# Clone
 git clone https://github.com/defthrets/chirpa.git
 cd chirpa
-
-# Run — chart.min.js is auto-staged into the data dir (~/.chirpa) on first launch
-python3 birdnet_gui.py
+./linux/install.sh
 ```
 
-Server runs on `http://127.0.0.1:8090` and opens in your browser automatically.
+The script:
 
-## Tailscale Serve (recommended for remote access)
+1. Checks for `python3` (and warns if `ffprobe`/ffmpeg is missing — optional).
+2. Installs the app to `~/.local/share/chirpa` (no root required).
+3. Sets up a **systemd user service** so Chirpa starts on login and restarts on
+   failure, then starts it immediately.
+
+Open **http://127.0.0.1:8090** when it's done.
+
+**Options:**
+
+```bash
+./linux/install.sh --no-service     # install only, don't set up systemd
+./linux/install.sh --port 9000      # serve on a different port
+./linux/install.sh --dir /opt/chirpa
+./linux/install.sh --uninstall      # remove service + files (keeps ~/.chirpa data)
+```
+
+**Manage the service:**
+
+```bash
+systemctl --user status chirpa
+systemctl --user restart chirpa
+journalctl --user -u chirpa -f      # live logs
+```
+
+If you don't use systemd, run with `--no-service` and start it manually (see
+below). To install ffmpeg for full RTSP verification:
+
+```bash
+sudo apt install ffmpeg     # Debian/Ubuntu
+sudo dnf install ffmpeg     # Fedora
+sudo pacman -S ffmpeg       # Arch
+```
+
+### B. Remote access with Tailscale (optional)
 
 ```bash
 tailscale serve --bg --https=8090 http://127.0.0.1:8090
 ```
 
-Then access via `https://<your-tailnet>.ts.net:8090`.
+Then reach it at `https://<your-tailnet>.ts.net:8090`.
 
-## Systemd Service
+---
+
+## Manual run (any OS)
+
+Requires **Python 3.9+** (stdlib only — no `pip install` needed):
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp birdnet-gui.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now birdnet-gui
+git clone https://github.com/defthrets/chirpa.git
+cd chirpa
+python3 birdnet_gui.py
 ```
+
+`chart.min.js` is auto-staged into the data dir (`~/.chirpa`) on first launch,
+and the dashboard opens in your browser. Server runs on `http://127.0.0.1:8090`.
+
+---
+
+## Configuration
+
+Everything is per-user and overridable via the environment — nothing is
+hardcoded to a specific machine, account, or location:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CHIRPA_HOST` / `CHIRPA_PORT` | `127.0.0.1` / `8090` | Bind address / port |
+| `CHIRPA_HOME` | `~/.chirpa` | Data directory (camera config, images, species DB) |
+| `CHIRPA_LISTENER_DB` | `~/.birdnet-listener/detections.db` | BirdNET detection database to read |
+| `CHIRPA_UTC_OFFSET` | _system timezone_ | Force a fixed UTC offset in hours |
+| `CHIRPA_GEOLOOKUP` | _unset_ | `1` enables optional IP geolocation (off by default — no outbound calls) |
+| `CHIRPA_NO_BROWSER` | _unset_ | `1` disables auto-opening the browser |
+
+Times are shown in the machine's local timezone, and the BirdNET latitude/
+longitude are set by each user in **Settings**.
+
+> **Upgrading?** On first launch Chirpa automatically moves a legacy
+> `~/.skyrats` data folder to `~/.chirpa`, so your cameras, images, and species
+> DB carry over with no manual steps.
+
+---
+
+## Camera setup wizard
+
+**Settings → + Add Camera** walks you through connecting an RTSP camera:
+
+- **Finding your camera's IP address** — via your router's admin page, the
+  manufacturer's app, or a network scan (`arp -a`, Advanced IP Scanner, Fing,
+  ONVIF Device Manager).
+- **Building & testing the RTSP URL** — per-brand stream paths plus a universal
+  walkthrough and VLC test instructions.
+- **Connection testing** — the wizard pings the camera, checks port 554, and
+  (when `ffprobe` is available) probes the RTSP handshake before saving.
+
+---
 
 ## Architecture
 
@@ -113,14 +184,19 @@ birdnet_gui.py          — Single-file Python HTTP server
   /api/bird-detail     — Species detail with Wikidata enrichment
   /api/camera-config   — Camera CRUD
   /api/recent          — Recent detections with pagination
+  /api/test-connection — Camera reachability + RTSP probe
   /chart-js            — Serves chart.min.js
   /img/<filename>      — Serves <data-dir>/images/*
+
+windows/                — Self-contained Windows installer (Inno Setup + build.ps1)
+linux/install.sh        — Linux installer + systemd user service
 ```
 
 ## Data
 
 Depends on BirdNET's SQLite schema:
-- `detections` table — species, confidence, timestamp, camera
+
+- `detections` table — species, confidence, timestamp, source (camera)
 
 Species images and stats SVGs are sourced from the data directory's `images/`
 folder (default `~/.chirpa/images/`).
