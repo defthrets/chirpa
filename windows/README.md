@@ -52,8 +52,10 @@ If Inno Setup isn't found, the script still stages a ready-to-zip app folder at
 - Chirpa serves the dashboard at <http://localhost:8090> and opens your default
   browser automatically.
 
-Your camera configuration lives in `%USERPROFILE%\.skyrats\cameras.json` and is
-**kept** on uninstall.
+Your camera configuration lives in `%USERPROFILE%\.skyrats\cameras.json`. The
+uninstaller performs a **full clean removal** — it deletes the entire
+`%USERPROFILE%\.skyrats` directory (camera config, cached images, and species
+DB), leaving nothing behind.
 
 ## Running without the installer (portable)
 

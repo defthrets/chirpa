@@ -68,9 +68,9 @@ Name: "{userstartup}\{#AppName}";      Filename: "{app}\{#PyW}"; Parameters: """
 Filename: "{app}\{#AppExeLauncher}"; Description: "Launch {#AppName} now"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Remove the chart asset we stage into the user profile on first run.
-; (Camera config in %USERPROFILE%\.skyrats\cameras.json is intentionally kept.)
-Type: files; Name: "{%USERPROFILE}\.skyrats\chart.min.js"
+; Full clean removal: delete the entire Chirpa data directory on uninstall
+; (camera config, cached images, species DB, and the staged chart.min.js).
+Type: filesandordirs; Name: "{%USERPROFILE}\.skyrats"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] on your computer.%n%nChirpa is fully self-contained — a private Python runtime and the ffmpeg tools used to verify camera RTSP streams are included. Nothing else needs to be installed.%n%nIt is recommended that you close all other applications before continuing.
