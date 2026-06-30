@@ -99,6 +99,8 @@ c_info "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 install -m 0644 "$REPO_ROOT/birdnet_gui.py" "$INSTALL_DIR/birdnet_gui.py"
 install -m 0644 "$REPO_ROOT/chart.min.js"   "$INSTALL_DIR/chart.min.js"
+# Logo (served at /img/chirpa_logo.png) — optional, copied if present.
+[ -f "$REPO_ROOT/chirpa_logo.png" ] && install -m 0644 "$REPO_ROOT/chirpa_logo.png" "$INSTALL_DIR/chirpa_logo.png"
 c_ok "copied birdnet_gui.py and chart.min.js"
 
 # ── systemd user service ─────────────────────────────────────────────
