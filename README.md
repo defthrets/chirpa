@@ -1,6 +1,6 @@
 # 🐦 Chirpa
 
-BirdNET detection dashboard with Dark Material UI, RTSP camera wizard, species encyclopedia, and real-time charts.
+BirdNET detection dashboard, RTSP camera wizard, species encyclopedia, and real-time charts.
 
 ## Features
 
