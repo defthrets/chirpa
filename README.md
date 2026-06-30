@@ -17,7 +17,7 @@ real-time charts.
 ## ⬇️ Download
 
 - **[⬇️ Download Chirpa (source ZIP)](https://github.com/defthrets/chirpa/archive/refs/heads/master.zip)** — works on any OS; unzip and follow the [install steps](#install) below.
-- **[📦 Releases page](https://github.com/defthrets/chirpa/releases/latest)** — grab the packaged **Windows installer** (`ChirpaSetup.exe`) here once a release is published.
+- **[📦 Releases page](https://github.com/defthrets/chirpa/releases/latest)** — grab the packaged **Windows installer** (`ChirpaSetup.exe`). Each version tag automatically builds and publishes it here via GitHub Actions.
 - **Clone instead:** `git clone https://github.com/defthrets/chirpa.git`
 
 ---

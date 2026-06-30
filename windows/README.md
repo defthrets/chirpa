@@ -33,7 +33,33 @@ wizard fully validates RTSP streams on a clean machine.
 
 3. The finished installer lands in **`windows\dist\ChirpaSetup.exe`**.
 
+## Automated builds (GitHub Actions)
+
+You don't have to build locally. The workflow at
+[`.github/workflows/build-windows-installer.yml`](../.github/workflows/build-windows-installer.yml)
+builds `ChirpaSetup.exe` on a Windows runner:
+
+- **Push a version tag** → builds the installer and publishes it to a GitHub
+  Release of the same name (so it appears on the
+  [Releases page](https://github.com/defthrets/chirpa/releases/latest)):
+
+  ```bash
+  git tag v1.0.0
+  git push origin v1.0.0
+  ```
+
+- **Run it manually** (Actions tab → *Build Windows installer* → *Run workflow*)
+  → builds the installer and uploads it as a downloadable workflow artifact,
+  without creating a release.
+
 ### Options
+
+```powershell
+# Pin a specific Python, or point at an Inno Setup install:
+powershell -ExecutionPolicy Bypass -File build.ps1 -PythonVersion 3.11.9 -IsccPath "C:\Inno\ISCC.exe"
+```
+
+If Inno Setup isn't found, the script still stages a ready-to-zip app folder at
 
 ```powershell
 # Pin a specific Python, or point at an Inno Setup install:
