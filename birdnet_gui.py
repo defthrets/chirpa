@@ -873,7 +873,6 @@ select.inp{cursor:pointer}
   </div>
 </div>
 <!-- end tab-dashboard -->
-</div>
 
 <!-- Settings Tab -->
 <div id="tab-settings" class="container" style="display:none">
@@ -964,6 +963,8 @@ select.inp{cursor:pointer}
     <button class="tab-btn" style="margin-top:12px;background:#303134;color:#8ab4f8" onclick="saveBirdnetSettings()">Save BirdNET Settings</button>
   </div>
 </div>
+</div>
+<!-- end tab-settings -->
 
 <!-- Detail Modal -->
 <div id="detail-overlay" onclick="if(event.target===this)closeDetail()">
