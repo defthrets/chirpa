@@ -59,6 +59,8 @@ New-Item -ItemType Directory -Force -Path $Staging, $Cache, $OutDir | Out-Null
 Write-Step "Staging Chirpa app files"
 Copy-Item (Join-Path $RepoRoot "birdnet_gui.py") $Staging
 Copy-Item (Join-Path $RepoRoot "chart.min.js")   $Staging
+# Logo (served by the app at /img/chirpa_logo.png). Optional — copied if present.
+Copy-Item (Join-Path $RepoRoot "chirpa_logo.png") $Staging -ErrorAction SilentlyContinue
 # Note: the repo README is intentionally NOT bundled — the shipped app stays
 # free of source-repo URLs and developer-facing docs.
 

@@ -732,6 +732,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400)
                 return
             fpath = os.path.join(LOCAL_IMG, fname)
+            # Fall back to assets bundled with the app (e.g. the Chirpa logo),
+            # so they render on a fresh install before the data dir is populated.
+            if not os.path.isfile(fpath):
+                for sub in ("assets", "."):
+                    cand = os.path.join(APP_DIR, sub, fname)
+                    if os.path.isfile(cand):
+                        fpath = cand
+                        break
             if os.path.isfile(fpath):
                 ext = os.path.splitext(fname)[1].lower()
                 mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -766,7 +774,7 @@ HTML = r"""<!DOCTYPE html>
 /* System font stack — no external font CDN needed */
 @font-face{font-family:'Google Sans';src:local('Roboto'),local('sans-serif')}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,sans-serif;background:#202124;color:#e8eaed;min-height:100vh}
-.topbar{background:#303134;border-bottom:1px solid#3c4043;padding:0 24px;height:64px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100}
+.topbar{background:#303134;border-bottom:1px solid#3c4043;padding:0 24px;height:64px;display:flex;align-items:center;justify-content:center;gap:14px;position:sticky;top:0;z-index:100}
 .topbar h1{font-family:'Google Sans',sans-serif;font-size:22px;font-weight:500;color:#8ab4f8;display:flex;align-items:center;gap:8px}
 .topbar .sub{font-size:13px;color:#9aa0a6}
 .topbar .chip{background:rgba(138,180,248,.15);color:#8ab4f8;padding:4px 12px;border-radius:16px;font-size:12px;font-weight:500}
@@ -819,7 +827,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
 .species-card .perf{font-size:12px;color:#9aa0a6}
 .species-card .mini-bar{flex:1;min-width:60px;height:4px;background:#3c4043;border-radius:2px;overflow:hidden}
 .species-card .mini-fill{height:100%;border-radius:2px}
-.tab-bar{display:flex;gap:4px;background:#202124;border-radius:24px;padding:4px;margin-bottom:20px;width:fit-content}
+.tab-bar{display:flex;gap:4px;background:#202124;border-radius:24px;padding:4px;margin:0 auto 20px;width:fit-content}
 .tab-btn{padding:8px 20px;border-radius:20px;border:none;background:transparent;font-size:13px;font-weight:500;color:#9aa0a6;cursor:pointer;transition:all .2s}
 .tab-btn.active{background:#303134;color:#8ab4f8;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .per-btn{padding:6px 14px;border-radius:16px;border:1px solid #3c4043;background:transparent;font-size:12px;font-weight:500;color:#9aa0a6;cursor:pointer;transition:all .15s}
